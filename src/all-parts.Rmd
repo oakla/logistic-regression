@@ -1,0 +1,224 @@
+---
+title: "Are Tired Ford SUVs Inadequate?"
+author: "Alex Oakely"
+date: "17/10/2019"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The popularity of the Ford Explorer may be undeserved, and also dangerous. There have been concerns that the Ford SUV is susceptible to an increased accident risk while carrying heavy loads, as a result of inadequate tires. This risk in apparently present even when these tires are of the size prescribed by the manufacturer.
+The present study investigated a dataset of fatal accidents that occurred between 1995 and 1999. The dataset includes 1995 and later model SUVs. It excludes accidents involving alcohol (according to police reports), and accidents where the car of interest was struck by another car.
+
+### Variable Description
+The four variables in the dataset were;
+
+* Cause (NotTire|Tire)
+  + Either the accident was caused by the tires (Tire) or it was caused by something else (NotTire)
+* Make (Ford|Other)
+  + Either the car was a Ford or it was something else (Other)
+* VehicleAge (Years)
+  + The age of the car in years.
+* Passengers (Number of passengers)
+  + The number of passengers in the car.
+
+The variables Passenger and VehicleAge are of interest because it is expected that they would influence the probability of a crash being cause by tires. The Passengers variable affects tire safety by being an indirect measure of load carried by the car. VehicleAge on the other hand is expected to affect tire safety by being an indicator of how old the tires were. We note that the maximum value for VehicleAge is 5 years. This is the standard recommended lifespan of new tires. This means that a 4 year old car is likely to have 4 year old tires on it. Older tires are likely to be less effective than brand new tires.
+
+### The Question of Interest
+The specific question of interest was, _were Fords more likely to have tires recorded as the cause of a crash_? More specifically, could the Make variable predict the Cause of crash after the other two variables, VehicleAge and Passengers, had been accounted for.
+
+## Findings
+
+It was discovered that Fords are more susceptible to accidents being caused by the tires. It seems that this risk can be mitigated by having new tires and not carrying heavy loads.
+
+The odds of the cause of crash being the Tires instead something else other than alcohol or another driver are 15.76 times higher in a Ford (95% CI: 5.78 - 53.57)
+
+# Statistical methods and results
+```{r echo=FALSE, results='hide'}
+library(Sleuth3)
+```
+
+### Part 1 - The basic odds ratio
+The first step of the analysis was to see what the odds ratio of Cause being equal to Tire for Fords and non-Fords
+
+```{r}
+my_df <- ex2018
+my_df$Make <- factor(my_df$Make, levels=c("Other", "Ford"))
+
+# The counts for Make x Cause are shown here
+table(my_df$Make, my_df$Cause)
+
+## lets use Fisher's Exact test
+fisher.test(table(my_df$Make,my_df$Cause))
+# this gives an odds ratio (15.7628) and a 95% confidence interval (5.79, 53.6)
+
+```
+The odds ratio shown above indicates that the odds of Cause being NotTire is more for non-Fords than Fords. The 95% confidence interval does not include 1, so we can confidently say that Make being Ford is correlated with accidents being caused by tires.
+
+Calculating the odds ration "by hand" yield a similar value for odds ratio, which backs up the result from Fisher's Exact test
+```{r}
+# calculating the odds ratio by hand
+my_tab = table(my_df$Make,my_df$Cause)
+(my_tab[1,1] * my_tab[2,2])/(my_tab[2,1]*my_tab[1,2])
+```
+
+## Part 2 - Building a Predictive Model
+## Fitting a model with just main effects
+```{r}
+## Try a fit with just the main effects of all the predictors
+fit.all.main <- glm(Cause ~ VehicleAge + Passengers + Make, family=binomial(link = logit), data=ex2018)
+summary(fit.all.main)
+
+### each X seems to be doing something
+anova(fit.all.main, test="Chisq")
+### and the Make variable is significant even after every other variable has been used.
+
+## is this model adequate?
+residual.deviance <- summary(fit.all.main)$deviance
+d.o.f <- summary(fit.all.main)$df.residual
+1-pchisq(residual.deviance,d.o.f)
+#yes... although this is suspicisouly high
+```
+According to our goodness of fit test, our model is perfect. This does not seem realistic. (On further investigation, it turns out the our value for degrees of freedom is much too high). 
+
+The ANOVA gives us evidence for the ability for Make to predict Cause. Make was fit last, so the fact that the ANOVA gives a significant p-value for it means that it can explain some of the variation that the other variables cannot.
+
+### Looking into ideas for variable Transforms
+Before trying interaction terms, we investigated the possibility of transforming the explanatory variables.
+```{r}
+range(my_df$Passengers)
+passengers <- seq(0,11,by=1)
+tire_freq = integer(12)
+totals = integer(12)
+for(i in passengers){
+  temp_df <- subset(my_df, Passengers ==i)
+  tires.freq <- as.data.frame(table(temp_df$Cause))[2,2]
+  not.tires.freq <- as.data.frame(table(temp_df$Cause))[1,2]
+  tire_freq[i] <- tires.freq
+  totals[i] <- not.tires.freq + tires.freq
+}
+pass.probs <- tire_freq/totals
+pass.odds <- (1-pass.probs)/pass.probs
+plot(passengers,log(pass.odds),ylab="Odds of NotTire",xlab="Passengers",main="Odds of NotTire vs Passengers for all Makes")
+### sadly that did not show anything interesting
+###
+### what if we only plot the fords
+tire_freq = integer(12)
+totals = integer(12)
+for(i in passengers){
+  temp_df <- subset(my_df, Passengers ==i)
+  temp_df <- subset(temp_df, Make=="Ford")
+  tires.freq <- as.data.frame(table(temp_df$Cause))[2,2]
+  not.tires.freq <- as.data.frame(table(temp_df$Cause))[1,2]
+  tire_freq[i] <- tires.freq
+  totals[i] <- not.tires.freq + tires.freq
+}
+pass.probs <- tire_freq/totals
+pass.odds <- (1-pass.probs)/pass.probs
+plot(passengers,log(pass.odds),ylab="odds of not-tires",xlab="Passengers",main="Odds of NotTire vs Passengers for just the Fords")
+# Surpsingly, it looks the same
+
+```
+
+This graphical investigation was also run for Make=Other, and then repeated for VehicleAge instead of Passengers. Nothing of interest was found. The code of this investigation is omitted for clarity.
+
+### Fitting a Model with Interactions
+The next step was to see if the model could be improved with one or more interaction terms. We decided that the step function was the easiest way to do this. We tried this with a couple of different scopes, but landed on the same final model in each case. A sample of this code is shown below as an example.
+
+```{r}
+
+# Let's fit a model a basic regression model and then see if step can improve it
+fit.basic <- glm(Cause ~ VehicleAge, data=my_df, family=binomial(link="logit"))
+```
+```{r}
+step.fit <- step(fit.basic,scope=list(lower=.~1,
+                                      upper=.~ VehicleAge*Passengers
+                                      *Make))
+```
+
+```{r}
+summary(step.fit)
+```
+The AIC of 201.41 is slightly lower than the model with only the main effects, and lower is better, so we decided to go with this.
+
+
+```{r}
+library(oddsratio)
+library(Sleuth3)
+my_df <- ex2018
+my_df$Make <- factor(my_df$Make, levels=c("Other", "Ford"))
+my_df$Cause <- factor(my_df$Cause, levels=c("NotTire", "Tire")) #apparently this is the default
+
+fit.1 <- glm(formula = Cause ~ VehicleAge + Make + Passengers + Make:Passengers, family = binomial(link = "logit"), data = my_df)
+
+or_glm(data=my_df, model=fit.1, incr = list(Passengers=1,
+                                            VehicleAge=1
+))
+
+exp(confint(fit.1)) #same result for confints above
+
+
+```
+In all cases the fitted coefficients where greater than 1, even in the lower bound of their 95% CIs. Increasing their corresponding variable by 1 would have a multiplicative effect on the log(odds). This multiplicative effect would be equal to multiplying by the coefficient.
+
+### Making Predictions and Visualizing the findings
+
+If we make a prediction for every one of the 132 possible combinations of our explanatory variables, we can try plotting the results.
+
+```{r}
+library(Sleuth3)
+my_df <- ex2018
+my_df$Make <- factor(my_df$Make, levels=c("Other", "Ford"))
+my_df$Cause <- factor(my_df$Cause, levels=c("NotTire", "Tire")) #apparently this is the default
+fit.1 <- glm(formula = Cause ~ VehicleAge + Make + Passengers + Make:Passengers, family = binomial(link = "logit"), data = my_df)
+
+```
+```{r}
+passengers <- seq(0,10,1)
+ages <- seq(0,5,1)
+makes <- c("Other","Ford")
+grid <- expand.grid(Passengers=passengers, VehicleAge=ages, Make=makes)
+pred.response <- predict(fit.1, newdata=grid,  type="response")
+all.combos.preds<-data.frame(Prediction=pred.response, grid)
+```
+```{r}
+library(ggplot2)
+p <- ggplot(data=all.combos.preds, aes(x=Passengers, y=VehicleAge, size=Prediction, color=Make)) + geom_point()
+p + 
+  xlab("Number of Passengers") + geom_jitter()+
+  ylab("Age of Vehicle (years)") +
+  ggtitle("All the Variables in one monster plot") +
+  scale_fill_manual(name="Area") +
+  #guides(size= FALSE) + 
+  labs(color=expression ("Make"),
+       caption = "Figure is a graphic that shows predictions of Cause made using the three other variables.")
+
+
+```
+
+From the above graph we can see the dots for Fords tend to be much larger, which indicates tend to be ones we predict to have higher chance of the cause of a crash being the tires.
+
+## The accuracy of our model.
+As an indicator of the success of our model, this table shows the predictions it would make on the current dataset. Of course we acknowledge that testing a model on the same data it was trained on is not a reliable way to assess the model, we still think it demonstrates some value.
+```{r}
+
+passengers <- seq(0,10,1)
+ages <- seq(0,5,1)
+makes <- c("Other","Ford")
+grid <- expand.grid(Passengers=passengers, VehicleAge=ages, Make=makes)
+pred.response <- predict(fit.1, type="response")
+df_plus <- data.frame(Prediction=pred.response, my_df)
+outcomes.table <- table(df_plus$Cause, df_plus$Prediction < 0.5)
+#We can see that the accuracy of prediction for Cause=NotTire is 
+outcomes.table[1,2]/(outcomes.table[1,2]+outcomes.table[1,1])
+#This looks good. However the story for Cause=Tire is a bit different
+outcomes.table[2,1]/(outcomes.table[2,2]+outcomes.table[2,1])
+# This is much lower.
+
+```
+All things considered, there is good evidence that Ford SUVs represented in this dataset had tire problems that interacted with the age of the tires and the load being carried by the car.
+
+Additionally, we would have liked to address the problem of the high degrees of freedom in the Goodness-of-Fit Test. Perhaps this could have been addressed by counting the 'successes' and 'failures' for each of the 132 combinations of factors levels. A 'new' dataset could have been constructed, which could have been analyzed in similar fashion to what we have down above.
